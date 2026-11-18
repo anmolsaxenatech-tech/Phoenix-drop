@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, LogIn, Lock, ShieldAlert, Loader2, KeyRound } from 'lucide-react';
+import { X, LogIn, ShieldAlert, Loader2 } from 'lucide-react';
 import { api } from '../services/api.js';
 
 interface JoinRoomModalProps {
@@ -12,9 +12,6 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({ onClose, initialCo
   const navigate = useNavigate();
   const [codeOrUrl, setCodeOrUrl] = useState(initialCode);
   const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('');
-  const [requiresPassword, setRequiresPassword] = useState(false);
-  const [targetRoomId, setTargetRoomId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +40,10 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({ onClose, initialCo
       // 1. Look up room info
       const roomData = await api.getRoom(identifier);
 
+      if (roomData.isClosed) {
+        throw new Error('This room has been permanently closed by the host.');
+      }
+
       if (roomData.isLocked) {
         throw new Error('This room is currently locked by the host.');
       }
@@ -51,26 +52,8 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({ onClose, initialCo
         throw new Error('Room has reached its maximum participant capacity.');
       }
 
-      // 2. Handle password verification if needed
-      if (roomData.isPasswordProtected && !password) {
-        setRequiresPassword(true);
-        setTargetRoomId(roomData.room.id);
-        setLoading(false);
-        return;
-      }
-
-      if (roomData.isPasswordProtected && password) {
-        const valid = await api.verifyPassword(roomData.room.id, password);
-        if (!valid) {
-          throw new Error('Invalid room password. Please try again.');
-        }
-      }
-
       const finalDisplayName = displayName.trim() || 'Guest';
       sessionStorage.setItem(`phoenix_name_${roomData.room.id}`, finalDisplayName);
-      if (password) {
-        sessionStorage.setItem(`phoenix_pass_${roomData.room.id}`, password);
-      }
 
       onClose();
       navigate(`/room/${roomData.room.id}`);
@@ -137,27 +120,6 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({ onClose, initialCo
               placeholder="e.g. Jordan"
             />
           </div>
-
-          {requiresPassword && (
-            <div className="pt-2 animate-in fade-in">
-              <label className="block text-xs font-semibold text-orange-400 mb-1.5 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>This Room is Password Protected</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3.5 py-2.5 bg-zinc-900 border border-orange-500/50 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition"
-                  placeholder="Enter room password"
-                  autoFocus
-                />
-                <Lock className="w-4 h-4 text-orange-400 absolute left-3 top-3" />
-              </div>
-            </div>
-          )}
 
           {/* Action buttons */}
           <div className="pt-4 flex items-center justify-end gap-3 border-t border-zinc-800">

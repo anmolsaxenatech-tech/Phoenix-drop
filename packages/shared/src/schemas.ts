@@ -20,8 +20,10 @@ export const RoomSettingsSchema = z.object({
 });
 
 export const CreateRoomSchema = z.object({
-  name: z.string().trim().min(2).max(64).default('Phoenix Drop Room'),
-  password: z.string().min(4).max(64).optional().or(z.literal('')),
+  name: z.string({ required_error: 'Room name is required' })
+    .trim()
+    .min(1, 'Room name is required')
+    .max(64, 'Room name must be 64 characters or fewer'),
   displayName: z.string().trim().min(1).max(32).default('Host'),
   deviceType: z.enum(['desktop', 'mobile', 'tablet', 'unknown']).default('unknown'),
   settings: RoomSettingsSchema.partial().optional()
@@ -30,8 +32,7 @@ export const CreateRoomSchema = z.object({
 export const JoinRoomSchema = z.object({
   roomId: z.string().trim().optional(),
   roomCode: z.string().trim().length(6).optional(),
-  displayName: z.string().trim().min(1).max(32),
-  password: z.string().optional(),
+  displayName: z.string().trim().min(1, 'Display name is required').max(32),
   deviceType: z.enum(['desktop', 'mobile', 'tablet', 'unknown']).default('unknown')
 }).refine(data => data.roomId || data.roomCode, {
   message: 'Either roomId or roomCode must be provided'
@@ -41,13 +42,13 @@ export const UpdateRoomSettingsSchema = z.object({
   roomId: z.string(),
   hostToken: z.string(),
   settings: RoomSettingsSchema.partial(),
-  name: z.string().trim().min(2).max(64).optional()
+  name: z.string().trim().min(1, 'Room name is required').max(64).optional()
 });
 
 export const HostActionSchema = z.object({
   roomId: z.string(),
   hostToken: z.string(),
-  action: z.enum(['lock', 'unlock', 'kick_participant', 'transfer_host', 'delete_room']),
+  action: z.enum(['lock', 'unlock', 'kick_participant', 'transfer_host', 'delete_room', 'close_room']),
   targetParticipantId: z.string().optional()
 });
 

@@ -37,6 +37,11 @@ export function setupSignaling(io: Server): void {
           return;
         }
 
+        if (room.isClosed) {
+          callback?.({ error: 'This room has been permanently closed by the host' });
+          return;
+        }
+
         if (room.isLocked) {
           callback?.({ error: 'This room is currently locked by the host' });
           return;
@@ -45,18 +50,6 @@ export function setupSignaling(io: Server): void {
         if (room.participants.size >= room.settings.maxParticipants) {
           callback?.({ error: 'Room has reached maximum participant capacity' });
           return;
-        }
-
-        if (room.passwordHash) {
-          if (!payload.password) {
-            callback?.({ error: 'Password required', requiresPassword: true });
-            return;
-          }
-          const valid = await verifyPassword(payload.password, room.passwordHash);
-          if (!valid) {
-            callback?.({ error: 'Invalid room password' });
-            return;
-          }
         }
 
         // Determine if first participant or host
@@ -289,11 +282,83 @@ export function setupSignaling(io: Server): void {
       io.to(data.roomId).emit('room:updated', { settings: room.settings, name: room.name });
     });
 
-    // 8. Disconnect Cleanup
+    // 8. Room Leave (Explicit participant leave)
+    socket.on('room:leave', async (callback?: (res: unknown) => void) => {
+      if (data.roomId && data.participantId) {
+        const roomId = data.roomId;
+        const participantId = data.participantId;
+        const displayName = data.displayName;
+
+        socket.leave(roomId);
+        const result = await RoomRepository.removeParticipant(roomId, participantId);
+        socket.to(roomId).emit('signal:peer_left', { peerId: participantId });
+
+        if (result.wasHost && result.newHostId) {
+          io.to(roomId).emit('room:host_transferred', { newHostId: result.newHostId });
+          const hostMsg: ChatMessage = {
+            id: uuidv4(),
+            roomId,
+            senderId: 'system',
+            senderName: 'System',
+            isHost: false,
+            isSystem: true,
+            content: 'Host left the room. Ownership transferred to remaining participant.',
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addChatMessage(roomId, hostMsg);
+          io.to(roomId).emit('chat:message', hostMsg);
+        }
+
+        if (displayName) {
+          const leaveMsg: ChatMessage = {
+            id: uuidv4(),
+            roomId,
+            senderId: 'system',
+            senderName: 'System',
+            isHost: false,
+            isSystem: true,
+            content: `${displayName} left the room`,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addChatMessage(roomId, leaveMsg);
+          socket.to(roomId).emit('chat:message', leaveMsg);
+        }
+
+        data.roomId = undefined;
+        data.participantId = undefined;
+        callback?.({ success: true });
+      }
+    });
+
+    // 9. Host Close Room Permanently
+    socket.on('host:close_room', async (payload: { hostToken: string }, callback?: (res: unknown) => void) => {
+      if (!data.roomId) return;
+      const room = await RoomRepository.findById(data.roomId);
+      if (!room || hashToken(payload.hostToken) !== room.hostTokenHash) {
+        callback?.({ error: 'Unauthorized: Invalid host token' });
+        return;
+      }
+
+      await RoomRepository.closeRoom(data.roomId);
+
+      // Notify all connected participants in real time
+      io.to(data.roomId).emit('room:closed', {
+        roomId: data.roomId,
+        message: 'The room has been permanently closed by the host.'
+      });
+
+      callback?.({ success: true });
+    });
+
+    // 10. Disconnect Cleanup
     socket.on('disconnect', async () => {
       if (data.roomId && data.participantId) {
-        await RoomRepository.removeParticipant(data.roomId, data.participantId);
+        const result = await RoomRepository.removeParticipant(data.roomId, data.participantId);
         socket.to(data.roomId).emit('signal:peer_left', { peerId: data.participantId });
+
+        if (result.wasHost && result.newHostId) {
+          socket.to(data.roomId).emit('room:host_transferred', { newHostId: result.newHostId });
+        }
 
         if (data.displayName) {
           const leaveMsg: ChatMessage = {

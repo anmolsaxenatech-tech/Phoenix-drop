@@ -135,7 +135,7 @@ export const LandingPage: React.FC = () => {
               </div>
               <h3 className="text-lg font-semibold text-zinc-100 mb-2">Create a Private Room</h3>
               <p className="text-sm text-zinc-400 leading-relaxed">
-                Generate an ephemeral room in seconds with no registration required. Configure passwords, participant limits, and expiration.
+                Generate an ephemeral room in seconds with no registration required. Configure participant limits, expiration, and permissions.
               </p>
             </div>
 
@@ -243,7 +243,7 @@ export const LandingPage: React.FC = () => {
               </div>
               <div className="flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                <span><strong>Argon2id/PBKDF2 Password Hashing:</strong> Room passwords are protected with salted, high-iteration cryptographic hashes.</span>
+                <span><strong>Cryptographic Tokens:</strong> Secure, high-entropy tokens protect host permissions and room access.</span>
               </div>
               <div className="flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />

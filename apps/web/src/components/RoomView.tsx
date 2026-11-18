@@ -22,7 +22,10 @@ import {
   Share2, 
   Copy, 
   Check, 
-  Clock 
+  Clock,
+  LogOut,
+  Power,
+  UserCheck 
 } from 'lucide-react';
 import { 
   RoomMetadata, 
@@ -37,6 +40,7 @@ import {
 import { Navbar } from './Navbar.js';
 import { FilePreviewModal } from './FilePreviewModal.js';
 import { HostSettingsModal } from './HostSettingsModal.js';
+import { api } from '../services/api.js';
 import { socketService } from '../services/socket.js';
 import { webrtcManager } from '../services/webrtcManager.js';
 import { transferEngine, FileTransferSession } from '../services/transferEngine.js';
@@ -48,12 +52,19 @@ export const RoomView: React.FC = () => {
   // Room state
   const [room, setRoom] = useState<RoomMetadata | null>(null);
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
+  const [selfId, setSelfId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [hostToken, setHostToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'files' | 'chat' | 'peers'>('files');
   const [unreadChat, setUnreadChat] = useState(0);
+
+  // Dialog states
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showHostLeaveDialog, setShowHostLeaveDialog] = useState(false);
+  const [showCloseRoomConfirm, setShowCloseRoomConfirm] = useState(false);
+  const [selectedNewHostId, setSelectedNewHostId] = useState<string>('');
 
   // Transfer state
   const [sessions, setSessions] = useState<FileTransferSession[]>([]);
@@ -73,7 +84,6 @@ export const RoomView: React.FC = () => {
 
     const storedHostToken = sessionStorage.getItem(`phoenix_host_${roomId}`);
     const displayName = sessionStorage.getItem(`phoenix_name_${roomId}`) || 'Guest';
-    const password = sessionStorage.getItem(`phoenix_pass_${roomId}`) || undefined;
 
     if (storedHostToken) {
       setHostToken(storedHostToken);
@@ -86,7 +96,6 @@ export const RoomView: React.FC = () => {
     socketService.joinRoom({
       roomId,
       displayName,
-      password,
       deviceType
     }).then((res) => {
       if (res.error) {
@@ -99,6 +108,7 @@ export const RoomView: React.FC = () => {
         setRoom(res.room);
         setParticipants(res.room.participants || []);
         setIsHost(res.self.isHost);
+        setSelfId(res.self.id);
 
         // Initialize WebRTC Manager
         webrtcManager.initialize(res.self.id, res.iceServers);
@@ -147,6 +157,23 @@ export const RoomView: React.FC = () => {
         setRoom((prev) => (prev ? { ...prev, name: data.name || prev.name, settings: data.settings } : prev));
       });
 
+      socket.on('room:host_transferred', (data: { newHostId: string }) => {
+        setParticipants((prev) =>
+          prev.map((p) => ({ ...p, isHost: p.id === data.newHostId }))
+        );
+        if (selfId && data.newHostId === selfId) {
+          setIsHost(true);
+        }
+      });
+
+      socket.on('room:closed', (data: { message?: string }) => {
+        alert(data.message || 'The room has been permanently closed by the host.');
+        sessionStorage.removeItem(`phoenix_host_${roomId}`);
+        sessionStorage.removeItem(`phoenix_token_${roomId}`);
+        sessionStorage.removeItem(`phoenix_name_${roomId}`);
+        navigate('/');
+      });
+
       socket.on('room:kicked', (data: { reason: string }) => {
         alert(data.reason || 'You have been disconnected by the host.');
         navigate('/');
@@ -160,6 +187,59 @@ export const RoomView: React.FC = () => {
       socketService.disconnect();
     };
   }, [roomId, navigate]);
+
+  // Leave & Close Room Handlers
+  const handleLeaveClick = () => {
+    const otherParticipants = participants.filter((p) => p.id !== selfId);
+    if (isHost && otherParticipants.length > 0) {
+      setSelectedNewHostId(otherParticipants[0].id);
+      setShowHostLeaveDialog(true);
+    } else {
+      setShowLeaveConfirm(true);
+    }
+  };
+
+  const handleConfirmLeave = async () => {
+    try {
+      await socketService.leaveRoom();
+      if (roomId) {
+        sessionStorage.removeItem(`phoenix_host_${roomId}`);
+        sessionStorage.removeItem(`phoenix_token_${roomId}`);
+        sessionStorage.removeItem(`phoenix_name_${roomId}`);
+      }
+      navigate('/');
+    } catch (e) {
+      navigate('/');
+    }
+  };
+
+  const handleHostLeaveWithTransfer = async () => {
+    if (!selectedNewHostId || !roomId || !hostToken) return;
+    try {
+      await api.executeHostAction(roomId, hostToken, 'transfer_host', selectedNewHostId);
+      await socketService.leaveRoom();
+      sessionStorage.removeItem(`phoenix_host_${roomId}`);
+      sessionStorage.removeItem(`phoenix_token_${roomId}`);
+      sessionStorage.removeItem(`phoenix_name_${roomId}`);
+      navigate('/');
+    } catch (err: any) {
+      alert(err.message || 'Failed to transfer ownership before leaving.');
+    }
+  };
+
+  const handleConfirmCloseRoom = async () => {
+    if (!roomId || !hostToken) return;
+    try {
+      await api.executeHostAction(roomId, hostToken, 'close_room');
+      await socketService.closeRoom(hostToken);
+      sessionStorage.removeItem(`phoenix_host_${roomId}`);
+      sessionStorage.removeItem(`phoenix_token_${roomId}`);
+      sessionStorage.removeItem(`phoenix_name_${roomId}`);
+      navigate('/');
+    } catch (err: any) {
+      alert(err.message || 'Failed to close room.');
+    }
+  };
 
   // Auto-scroll chat
   useEffect(() => {
@@ -258,6 +338,8 @@ export const RoomView: React.FC = () => {
         participantCount={participants.length}
         maxParticipants={room?.settings.maxParticipants}
         onOpenSettings={() => setShowSettingsModal(true)}
+        onLeaveRoom={handleLeaveClick}
+        onCloseRoom={() => setShowCloseRoomConfirm(true)}
       />
 
       {/* Main Grid View */}
@@ -315,6 +397,43 @@ export const RoomView: React.FC = () => {
 
         {/* Center Column: File Dropzone & Transfer Queue (Visible on 'files' tab) */}
         <div className={`lg:col-span-6 space-y-6 ${activeTab === 'files' ? 'block' : 'hidden lg:block'}`}>
+          {/* Room Header Card with Leave & Close Options */}
+          <div className="bg-[#12141a] border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white tracking-tight">{room?.name}</h2>
+                {isHost && (
+                  <span className="text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-full font-semibold">
+                    Host
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-400 font-mono mt-0.5">
+                Room Code: <span className="text-orange-400 font-bold">{room?.code}</span> • {participants.length} peer{participants.length === 1 ? '' : 's'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isHost && (
+                <button
+                  onClick={() => setShowCloseRoomConfirm(true)}
+                  className="px-3 py-1.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-800/80 text-red-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  title="Close room permanently for all peers"
+                >
+                  <Power className="w-3.5 h-3.5 text-red-400" />
+                  <span>Close Room</span>
+                </button>
+              )}
+              <button
+                onClick={handleLeaveClick}
+                className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-red-900/60 text-zinc-300 hover:text-red-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                title="Leave this room"
+              >
+                <LogOut className="w-3.5 h-3.5 text-zinc-400 hover:text-red-400" />
+                <span>Leave Room</span>
+              </button>
+            </div>
+          </div>
           {/* Mobile suspension alert if any */}
           {mobileWarning && (
             <div className="p-3.5 bg-amber-950/60 border border-amber-800/80 rounded-xl text-amber-200 text-xs flex items-start gap-2.5">
@@ -605,6 +724,137 @@ export const RoomView: React.FC = () => {
           session={previewSession}
           onClose={() => setPreviewSession(null)}
         />
+      )}
+
+      {/* Participant Leave Confirmation Modal */}
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#12141a] border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Leave Room?</h3>
+                <p className="text-xs text-zinc-400">You will disconnect from this file session.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Any ongoing peer transfers with your device will stop immediately. You can rejoin at any time using the room code.
+            </p>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setShowLeaveConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmLeave}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/30 transition cursor-pointer"
+              >
+                Leave Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Host Leave Dialog with Ownership Transfer */}
+      {showHostLeaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-[#12141a] border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-orange-500/10 text-orange-400">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Host Departure</h3>
+                <p className="text-xs text-zinc-400">Transfer room ownership before leaving</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              You are the room host. To keep the room open for remaining participants, choose a new host below. Alternatively, you can close the room for everyone.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-zinc-400">Select New Host:</label>
+              <select
+                value={selectedNewHostId}
+                onChange={(e) => setSelectedNewHostId(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white focus:outline-none focus:border-orange-500"
+              >
+                {participants
+                  .filter((p) => p.id !== selfId)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.displayName} ({p.deviceType})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="pt-3 flex flex-col sm:flex-row items-center justify-end gap-2">
+              <button
+                onClick={() => setShowHostLeaveDialog(false)}
+                className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmCloseRoom}
+                className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-850 hover:bg-red-950/80 text-zinc-300 hover:text-red-300 border border-zinc-750 hover:border-red-800 transition cursor-pointer"
+              >
+                Close Room
+              </button>
+              <button
+                onClick={handleHostLeaveWithTransfer}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-600/30 transition cursor-pointer"
+              >
+                Transfer & Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Host Close Room Permanent Confirmation Modal */}
+      {showCloseRoomConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#12141a] border border-red-900/60 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-red-500/10 text-red-400">
+                <Power className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Permanently Close Room?</h3>
+                <p className="text-xs text-red-300">This action cannot be undone</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Closing this room will immediately terminate all peer connections, cancel active file transfers, and redirect all participants to the homepage.
+            </p>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setShowCloseRoomConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmCloseRoom}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/30 transition cursor-pointer"
+              >
+                Close Room Now
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showSettingsModal && room && hostToken && (

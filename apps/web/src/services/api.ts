@@ -16,7 +16,7 @@ export interface CreateRoomResponse {
 export interface GetRoomResponse {
   room: RoomMetadata;
   isLocked: boolean;
-  isPasswordProtected: boolean;
+  isClosed?: boolean;
   isFull: boolean;
 }
 
@@ -43,17 +43,6 @@ export const api = {
     return res.json();
   },
 
-  async verifyPassword(roomId: string, password: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/api/rooms/${roomId}/verify-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (!res.ok) return false;
-    const body = await res.json();
-    return Boolean(body.valid);
-  },
-
   async updateSettings(
     roomId: string, 
     hostToken: string, 
@@ -74,7 +63,7 @@ export const api = {
   async executeHostAction(
     roomId: string, 
     hostToken: string, 
-    action: 'lock' | 'unlock' | 'kick_participant' | 'transfer_host' | 'delete_room',
+    action: 'lock' | 'unlock' | 'kick_participant' | 'transfer_host' | 'delete_room' | 'close_room',
     targetParticipantId?: string
   ): Promise<void> {
     const res = await fetch(`${API_BASE}/api/rooms/${roomId}/action`, {

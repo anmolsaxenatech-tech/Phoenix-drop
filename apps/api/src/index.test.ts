@@ -5,12 +5,14 @@ import { createApp } from './index.js';
 
 describe('Phoenix Drop API Integration Tests', () => {
   let server: http.Server;
+  let io: any;
   let baseUrl: string;
 
   before(async () => {
     process.env.NODE_ENV = 'test';
     const instance = createApp();
     server = instance.server;
+    io = instance.io;
     await new Promise<void>((resolve) => {
       server.listen(0, () => {
         const addr = server.address();
@@ -24,7 +26,13 @@ describe('Phoenix Drop API Integration Tests', () => {
 
   after(async () => {
     await new Promise<void>((resolve) => {
-      server.close(() => resolve());
+      if (io) {
+        io.close(() => {
+          server.close(() => resolve());
+        });
+      } else {
+        server.close(() => resolve());
+      }
     });
   });
 
@@ -81,36 +89,64 @@ describe('Phoenix Drop API Integration Tests', () => {
     assert.equal(body.room.code, code);
   });
 
-  it('POST /api/rooms with password verifies valid and invalid passwords', async () => {
+  it('POST /api/rooms rejects creation without a mandatory room name', async () => {
+    // Missing room name
+    const failRes1 = await fetch(`${baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Charlie'
+      })
+    });
+    assert.equal(failRes1.status, 400);
+
+    // Empty whitespace room name
+    const failRes2 = await fetch(`${baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '   ',
+        displayName: 'Charlie'
+      })
+    });
+    assert.equal(failRes2.status, 400);
+  });
+
+  it('POST /api/rooms creates password-free rooms and handles host closing room', async () => {
     const createRes = await fetch(`${baseUrl}/api/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: 'Protected Room',
-        password: 'SuperSecret123!',
+        name: 'Open Room',
         displayName: 'Charlie'
       })
     });
+    assert.equal(createRes.status, 201);
     const created = await createRes.json();
     const roomId = created.room.id;
+    const hostToken = created.hostToken;
 
-    // Verify invalid password
-    const failRes = await fetch(`${baseUrl}/api/rooms/${roomId}/verify-password`, {
+    // Room is active
+    const activeRes = await fetch(`${baseUrl}/api/rooms/${roomId}`);
+    assert.equal(activeRes.status, 200);
+
+    // Host closes room
+    const closeRes = await fetch(`${baseUrl}/api/rooms/${roomId}/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'WrongPassword' })
+      body: JSON.stringify({
+        roomId,
+        hostToken,
+        action: 'close_room'
+      })
     });
-    assert.equal(failRes.status, 401);
+    assert.equal(closeRes.status, 200);
 
-    // Verify correct password
-    const passRes = await fetch(`${baseUrl}/api/rooms/${roomId}/verify-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'SuperSecret123!' })
-    });
-    assert.equal(passRes.status, 200);
-    const passBody = await passRes.json();
-    assert.equal(passBody.valid, true);
+    // Subsequent access returns 410 closed
+    const fetchClosedRes = await fetch(`${baseUrl}/api/rooms/${roomId}`);
+    assert.equal(fetchClosedRes.status, 410);
+    const closedBody = await fetchClosedRes.json();
+    assert.equal(closedBody.isClosed, true);
   });
 
   it('POST /api/rooms/:id/settings rejects unauthorized updates and accepts valid host token', async () => {

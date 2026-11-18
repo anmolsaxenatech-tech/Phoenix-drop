@@ -90,6 +90,29 @@ export class SocketService {
     this.socket?.emit('host:update_settings', { settings, hostToken, name });
   }
 
+  closeRoom(hostToken: string): Promise<{ success?: boolean; error?: string }> {
+    if (!this.socket) return Promise.reject(new Error('Socket disconnected'));
+    return new Promise((resolve) => {
+      this.socket?.emit('host:close_room', { hostToken }, (res: { success?: boolean; error?: string }) => {
+        resolve(res);
+      });
+    });
+  }
+
+  leaveRoom(): Promise<void> {
+    if (!this.socket) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.socket?.emit('room:leave', () => {
+        this.disconnect();
+        resolve();
+      });
+      setTimeout(() => {
+        this.disconnect();
+        resolve();
+      }, 500);
+    });
+  }
+
   disconnect(): void {
     if (this.socket) {
       this.socket.disconnect();

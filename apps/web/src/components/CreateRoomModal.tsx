@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Lock, Users, Clock, ShieldAlert, Sparkles, Loader2 } from 'lucide-react';
+import { X, Users, Clock, ShieldAlert, Sparkles, Loader2 } from 'lucide-react';
 import { api } from '../services/api.js';
 
 interface CreateRoomModalProps {
@@ -9,9 +9,8 @@ interface CreateRoomModalProps {
 
 export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ onClose }) => {
   const navigate = useNavigate();
-  const [name, setName] = useState('Phoenix Drop Room');
+  const [name, setName] = useState('');
   const [displayName, setDisplayName] = useState('Host');
-  const [password, setPassword] = useState('');
   const [maxParticipants, setMaxParticipants] = useState(10);
   const [expirationHours, setExpirationHours] = useState(24);
   const [uploadsEnabled, setUploadsEnabled] = useState(true);
@@ -30,13 +29,19 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ onClose }) => 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('Please enter a room name.');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const response = await api.createRoom({
-        name,
-        displayName,
-        password: password.trim() ? password : undefined,
+        name: trimmedName,
+        displayName: displayName.trim() || 'Host',
         deviceType: getDeviceType(),
         settings: {
           maxParticipants,
@@ -50,7 +55,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ onClose }) => 
       // Save credentials in session storage for reconnects
       sessionStorage.setItem(`phoenix_host_${response.room.id}`, response.hostToken);
       sessionStorage.setItem(`phoenix_token_${response.room.id}`, response.participantToken);
-      sessionStorage.setItem(`phoenix_name_${response.room.id}`, displayName);
+      sessionStorage.setItem(`phoenix_name_${response.room.id}`, displayName.trim() || 'Host');
 
       onClose();
       navigate(`/room/${response.room.id}`);
@@ -90,15 +95,18 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ onClose }) => 
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Room Name</label>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+              Room Name <span className="text-orange-400">*</span>
+            </label>
             <input
               type="text"
               required
+              autoFocus
               maxLength={64}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500/80 transition"
-              placeholder="e.g. Design Handover"
+              placeholder="e.g. Design Handover, Sprint Planning"
             />
           </div>
 
@@ -113,22 +121,6 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ onClose }) => 
               className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500/80 transition"
               placeholder="e.g. Alex"
             />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-              Room Password <span className="text-zinc-500 font-normal">(Optional)</span>
-            </label>
-            <div className="relative">
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500/80 transition"
-                placeholder="Leave blank for open access"
-              />
-              <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-1">

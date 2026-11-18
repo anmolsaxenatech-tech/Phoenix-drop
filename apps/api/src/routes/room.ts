@@ -24,7 +24,7 @@ roomRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { name, password, displayName, settings: userSettings } = parseResult.data;
+    const { name, displayName, settings: userSettings } = parseResult.data;
 
     const roomId = uuidv4();
     let code = generateRoomCode();
@@ -42,11 +42,6 @@ roomRouter.post('/', async (req: Request, res: Response): Promise<void> => {
     const hostTokenHash = hashToken(hostToken);
     const participantToken = generateSecureToken();
     const hostParticipantId = uuidv4();
-
-    let passwordHash: string | undefined = undefined;
-    if (password && password.trim().length > 0) {
-      passwordHash = await hashPassword(password);
-    }
 
     const expirationHours = userSettings?.expirationHours || DEFAULT_ROOM_EXPIRATION_HOURS;
     const expiresAt = new Date(Date.now() + expirationHours * 60 * 60 * 1000);
@@ -66,7 +61,6 @@ roomRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       id: roomId,
       code,
       name,
-      passwordHash,
       hostTokenHash,
       expiresAt,
       settings: mergedSettings
@@ -116,6 +110,11 @@ roomRouter.get('/:idOrCode', async (req: Request, res: Response): Promise<void> 
 
     if (!room) {
       res.status(404).json({ error: 'Room not found or has expired' });
+      return;
+    }
+
+    if (room.isClosed) {
+      res.status(410).json({ error: 'This room has been permanently closed by the host', isClosed: true });
       return;
     }
 
@@ -229,6 +228,9 @@ roomRouter.post('/:id/action', async (req: Request, res: Response): Promise<void
     }
 
     switch (action) {
+      case 'close_room':
+        await RoomRepository.closeRoom(roomId);
+        break;
       case 'lock':
         room.isLocked = true;
         room.settings.isLocked = true;

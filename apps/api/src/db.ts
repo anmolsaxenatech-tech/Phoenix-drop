@@ -31,6 +31,7 @@ interface MemoryRoom {
   passwordHash?: string;
   hostTokenHash: string;
   isLocked: boolean;
+  isClosed: boolean;
   createdAt: Date;
   expiresAt: Date;
   settings: RoomSettings;
@@ -60,6 +61,7 @@ export class RoomRepository {
       passwordHash: data.passwordHash,
       hostTokenHash: data.hostTokenHash,
       isLocked: data.settings.isLocked,
+      isClosed: false,
       createdAt: new Date(),
       expiresAt: data.expiresAt,
       settings: data.settings,
@@ -124,10 +126,35 @@ export class RoomRepository {
     room.participants.set(participant.id, participant);
   }
 
-  static async removeParticipant(roomId: string, participantId: string): Promise<void> {
+  static async removeParticipant(roomId: string, participantId: string): Promise<{ newHostId?: string; wasHost: boolean }> {
     const room = await this.findById(roomId);
-    if (!room) return;
+    if (!room) return { wasHost: false };
+    const p = room.participants.get(participantId);
+    const wasHost = Boolean(p?.isHost);
     room.participants.delete(participantId);
+
+    // If leaving participant was the host and other participants remain,
+    // automatically elect the oldest remaining participant as the new host
+    let newHostId: string | undefined = undefined;
+    if (wasHost && room.participants.size > 0) {
+      const remaining = Array.from(room.participants.values());
+      const nextHost = remaining[0];
+      nextHost.isHost = true;
+      newHostId = nextHost.id;
+    }
+
+    return { wasHost, newHostId };
+  }
+
+  static async closeRoom(id: string): Promise<void> {
+    const room = memoryRooms.get(id);
+    if (room) {
+      room.isClosed = true;
+      room.isLocked = true;
+      room.settings.isLocked = true;
+      room.settings.uploadsEnabled = false;
+      room.settings.downloadsEnabled = false;
+    }
   }
 
   static async updateSettings(roomId: string, newSettings: Partial<RoomSettings>, newName?: string): Promise<void> {
@@ -206,6 +233,7 @@ export class RoomRepository {
       createdAt: room.createdAt.toISOString(),
       expiresAt: room.expiresAt.toISOString(),
       hostId,
+      isClosed: Boolean(room.isClosed),
       isPasswordProtected: Boolean(room.passwordHash),
       settings: room.settings,
       participants: Array.from(room.participants.values()).map(p => ({

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -77,7 +78,13 @@ export function createApp(): { app: Express; server: http.Server; io: SocketIOSe
 }
 
 // Start server if run directly
-if (process.env.NODE_ENV !== 'test') {
+const isMain = process.argv[1] && (
+  fileURLToPath(import.meta.url) === process.argv[1] ||
+  process.argv[1].endsWith('dist/index.js') ||
+  process.argv[1].endsWith('src/index.ts')
+);
+
+if (isMain && process.env.NODE_ENV !== 'test') {
   const { server } = createApp();
   startCleanupService();
 

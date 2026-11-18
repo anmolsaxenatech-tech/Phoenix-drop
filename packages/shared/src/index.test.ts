@@ -72,6 +72,18 @@ describe('Shared Protocol & Utilities', () => {
     });
     assert.equal(validCreate.success, true);
 
+    // Empty or whitespace-only room name must fail validation
+    const emptyNameCreate = CreateRoomSchema.safeParse({
+      name: '   ',
+      displayName: 'Alice'
+    });
+    assert.equal(emptyNameCreate.success, false);
+
+    const missingNameCreate = CreateRoomSchema.safeParse({
+      displayName: 'Alice'
+    });
+    assert.equal(missingNameCreate.success, false);
+
     const validJoin = JoinRoomSchema.safeParse({
       roomCode: 'ABCDEF',
       displayName: 'Bob'

@@ -20,6 +20,7 @@ interface HostSettingsModalProps {
   participants: ParticipantInfo[];
   onClose: () => void;
   onRoomDeleted: () => void;
+  onRoomClosed?: () => void;
   onSettingsUpdated: (newSettings: RoomSettings, newName?: string) => void;
 }
 
@@ -29,6 +30,7 @@ export const HostSettingsModal: React.FC<HostSettingsModalProps> = ({
   participants,
   onClose,
   onRoomDeleted,
+  onRoomClosed,
   onSettingsUpdated
 }) => {
   const [name, setName] = useState(room.name);
@@ -38,6 +40,7 @@ export const HostSettingsModal: React.FC<HostSettingsModalProps> = ({
   const [chatEnabled, setChatEnabled] = useState(room.settings.chatEnabled);
   const [isLocked, setIsLocked] = useState(room.settings.isLocked);
   const [loading, setLoading] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -86,6 +89,26 @@ export const HostSettingsModal: React.FC<HostSettingsModalProps> = ({
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to transfer host');
+    }
+  };
+
+  const handleCloseRoom = async () => {
+    if (!confirmClose) {
+      setConfirmClose(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.executeHostAction(room.id, hostToken, 'close_room');
+      await socketService.closeRoom(hostToken);
+      if (onRoomClosed) {
+        onRoomClosed();
+      } else {
+        onRoomDeleted();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to close room');
+      setLoading(false);
     }
   };
 
@@ -264,20 +287,36 @@ export const HostSettingsModal: React.FC<HostSettingsModalProps> = ({
           </div>
 
           {/* Danger Zone */}
-          <div className="pt-4 border-t border-red-950/60">
+          <div className="pt-4 border-t border-red-950/60 space-y-3">
             <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2">Danger Zone</h3>
-            <p className="text-xs text-zinc-500 mb-3">
-              Permanently close this room and disconnect all participants.
-            </p>
-            <button
-              type="button"
-              onClick={handleDeleteRoom}
-              disabled={loading}
-              className="w-full py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-200 font-semibold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>{confirmDelete ? 'Confirm: Delete Room Now' : 'Delete Room'}</span>
-            </button>
+            
+            <div className="p-3 bg-red-950/30 border border-red-900/40 rounded-xl space-y-2">
+              <p className="text-xs text-zinc-300 font-medium">Permanently Close Room</p>
+              <p className="text-[11px] text-zinc-400">
+                Immediately disconnects all peers, locks the room from any new joins, and blocks file transfers.
+              </p>
+              <button
+                type="button"
+                onClick={handleCloseRoom}
+                disabled={loading}
+                className="w-full py-2 bg-red-900/60 hover:bg-red-800 text-red-200 font-semibold rounded-lg text-xs transition cursor-pointer"
+              >
+                {confirmClose ? 'Confirm: Close Room Permanently' : 'Close Room'}
+              </button>
+            </div>
+
+            <div className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2">
+              <p className="text-xs text-zinc-400">Delete Room Data</p>
+              <button
+                type="button"
+                onClick={handleDeleteRoom}
+                disabled={loading}
+                className="w-full py-2 bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{confirmDelete ? 'Confirm: Delete Room' : 'Delete Room'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

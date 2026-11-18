@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Shield, Lock, Unlock, Copy, Share2, Check, Users } from 'lucide-react';
+import { Flame, Shield, Lock, Unlock, Copy, Share2, Check, Users, LogOut, Power } from 'lucide-react';
 
 interface NavbarProps {
   roomCode?: string;
@@ -8,6 +8,8 @@ interface NavbarProps {
   participantCount?: number;
   maxParticipants?: number;
   onOpenSettings?: () => void;
+  onLeaveRoom?: () => void;
+  onCloseRoom?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,7 +18,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   isLocked,
   participantCount = 0,
   maxParticipants = 10,
-  onOpenSettings
+  onOpenSettings,
+  onLeaveRoom,
+  onCloseRoom
 }) => {
   const [copied, setCopied] = React.useState(false);
 
@@ -110,9 +114,33 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isHost && onOpenSettings && (
               <button
                 onClick={onOpenSettings}
-                className="px-2.5 py-1.5 bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-500/40 rounded-lg text-xs font-semibold transition"
+                className="px-2.5 py-1.5 bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-500/40 rounded-lg text-xs font-semibold transition cursor-pointer"
               >
-                Host
+                Settings
+              </button>
+            )}
+
+            {/* Host Close Room Button */}
+            {isHost && onCloseRoom && (
+              <button
+                onClick={onCloseRoom}
+                title="Close room permanently for everyone"
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-200 border border-red-900/60 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>Close</span>
+              </button>
+            )}
+
+            {/* Leave Room Button for all participants */}
+            {onLeaveRoom && (
+              <button
+                onClick={onLeaveRoom}
+                title="Leave this room"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-red-300 border border-zinc-800 hover:border-red-900/60 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 text-zinc-400 hover:text-red-400" />
+                <span>Leave</span>
               </button>
             )}
           </div>

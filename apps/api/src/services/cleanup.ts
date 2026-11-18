@@ -16,5 +16,7 @@ export function startCleanupService(intervalMs = 60 * 60 * 1000): NodeJS.Timeout
     }
   }, intervalMs);
 
+  timer.unref();
+
   return timer;
 }

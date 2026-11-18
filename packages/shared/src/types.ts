@@ -35,7 +35,8 @@ export interface RoomMetadata {
   createdAt: string;
   expiresAt: string;
   hostId: string;
-  isPasswordProtected: boolean;
+  isClosed?: boolean;
+  isPasswordProtected?: boolean;
   settings: RoomSettings;
   participants: ParticipantInfo[];
 }
@@ -117,7 +118,6 @@ export interface PeerTransferStatus {
 export interface SignalJoinPayload {
   roomId: string;
   displayName: string;
-  password?: string;
   roomCode?: string;
   deviceType: DeviceType;
 }
@@ -148,7 +148,7 @@ export interface SignalIceCandidatePayload {
 export interface RoomActivityLog {
   id: string;
   roomId: string;
-  type: 'participant_joined' | 'participant_left' | 'file_shared' | 'file_downloaded' | 'settings_updated' | 'room_locked' | 'host_transferred';
+  type: 'participant_joined' | 'participant_left' | 'file_shared' | 'file_downloaded' | 'settings_updated' | 'room_locked' | 'room_closed' | 'host_transferred';
   description: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
