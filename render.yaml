@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: phoenix-drop-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build --workspace=@phoenix-drop/shared && npm run build --workspace=@phoenix-drop/api
+    startCommand: npm run start --workspace=@phoenix-drop/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: STUN_SERVERS
+        value: stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302

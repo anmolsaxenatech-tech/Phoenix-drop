@@ -1,0 +1,145 @@
+// PHOENIX DROP - Prisma Database Schema
+// Strictly zero file binaries - metadata and presence only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id                  String            @id @default(uuid())
+  code                String            @unique // 6-character human-friendly code
+  name                String
+  passwordHash        String?           // Argon2id hash if password protected
+  hostTokenHash       String            // SHA-256 / Argon2 hash of host secret token
+  isLocked            Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  expiresAt           DateTime          // Expiration timestamp for automatic cleanup
+  
+  settings            RoomSettings?
+  participants        RoomParticipant[]
+  messages            ChatMessage[]
+  activities          RoomActivity[]
+  hostTransfers       HostTransfer[]
+  transfers           TransferMetadata[]
+  auditLogs           AuditLog[]
+
+  @@index([code])
+  @@index([expiresAt])
+}
+
+model RoomSettings {
+  id                 String   @id @default(uuid())
+  roomId             String   @unique
+  maxParticipants    Int      @default(10)
+  maxFileSize        BigInt   @default(10737418240) // 10 GB in bytes
+  allowedExtensions  String   @default("") // comma-separated or JSON
+  uploadsEnabled     Boolean  @default(true)
+  downloadsEnabled   Boolean  @default(true)
+  chatEnabled        Boolean  @default(true)
+  expirationHours    Int      @default(24)
+  
+  room               Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model RoomParticipant {
+  id                 String    @id @default(uuid())
+  roomId             String
+  socketId           String
+  displayName        String
+  isHost             Boolean   @default(false)
+  participantToken   String    // Session token
+  deviceType         String    @default("unknown")
+  browser            String?
+  connectionStatus   String    @default("connected") // connected, disconnected
+  joinedAt           DateTime  @default(now())
+  leftAt             DateTime?
+  lastSeenAt         DateTime  @default(now())
+
+  room               Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([socketId])
+}
+
+model ChatMessage {
+  id          String   @id @default(uuid())
+  roomId      String
+  senderId    String
+  senderName  String
+  isHost      Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  content     String
+  createdAt   DateTime @default(now())
+
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model RoomActivity {
+  id          String   @id @default(uuid())
+  roomId      String
+  type        String   // participant_joined, participant_left, file_shared, settings_updated, etc.
+  description String
+  metadata    String?  // JSON string
+  createdAt   DateTime @default(now())
+
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model HostTransfer {
+  id             String   @id @default(uuid())
+  roomId         String
+  previousHostId String
+  newHostId      String
+  transferredAt  DateTime @default(now())
+
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model TransferMetadata {
+  id               String   @id @default(uuid())
+  roomId           String
+  fileId           String   @unique
+  fileName         String
+  fileSize         BigInt
+  fileType         String
+  totalChunks      Int
+  chunkSize        Int
+  sha256           String
+  senderId         String
+  senderName       String
+  status           String   @default("announced") // announced, transferring, completed, failed
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+
+  room             Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([fileId])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  roomId      String?
+  action      String   // room_created, participant_kicked, settings_changed, room_deleted, etc.
+  actorId     String
+  actorIp     String?  // Masked/anonymized IP for security audit
+  details     String?  // JSON details
+  createdAt   DateTime @default(now())
+
+  room        Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([action])
+}

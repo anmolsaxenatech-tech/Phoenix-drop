@@ -1,0 +1,17 @@
+{
+  "name": "Phoenix Drop",
+  "short_name": "PhoenixDrop",
+  "description": "One Room. Unlimited Possibilities. Direct peer-to-peer file sharing without cloud storage.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e0f12",
+  "theme_color": "#121316",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "phoenix-drop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phoenix Drop - One Room. Unlimited Possibilities. Free-first, zero-infrastructure peer-to-peer file sharing platform.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@phoenix-drop/shared && npm run build --workspace=@phoenix-drop/api && npm run build --workspace=@phoenix-drop/web",
+    "dev": "concurrently \"npm run dev --workspace=@phoenix-drop/shared\" \"npm run dev --workspace=@phoenix-drop/api\" \"npm run dev --workspace=@phoenix-drop/web\"",
+    "dev:api": "npm run dev --workspace=@phoenix-drop/api",
+    "dev:web": "npm run dev --workspace=@phoenix-drop/web",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
