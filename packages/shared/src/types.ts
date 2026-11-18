@@ -119,7 +119,9 @@ export interface SignalJoinPayload {
   roomId: string;
   displayName: string;
   roomCode?: string;
-  deviceType: DeviceType;
+  deviceType?: DeviceType;
+  participantToken?: string;
+  hostToken?: string;
 }
 
 export interface SignalJoinedResponse {
@@ -128,6 +130,8 @@ export interface SignalJoinedResponse {
   participantToken: string;
   hostToken?: string; // only provided to room creator
   iceServers: RTCIceServer[];
+  existingFiles?: StoredFile[];
+  activities?: RoomActivityLog[];
 }
 
 export interface SignalOfferPayload {
@@ -145,11 +149,49 @@ export interface SignalIceCandidatePayload {
   candidate: RTCIceCandidateInit;
 }
 
+export type ActivityType = 
+  | 'room_created'
+  | 'participant_joined'
+  | 'participant_left'
+  | 'host_transferred'
+  | 'file_uploaded'
+  | 'file_deleted'
+  | 'settings_updated'
+  | 'room_locked'
+  | 'room_closed'
+  | 'file_shared'
+  | 'file_downloaded';
+
 export interface RoomActivityLog {
   id: string;
   roomId: string;
-  type: 'participant_joined' | 'participant_left' | 'file_shared' | 'file_downloaded' | 'settings_updated' | 'room_locked' | 'room_closed' | 'host_transferred';
+  type: ActivityType;
   description: string;
+  actorId?: string;
+  actorName?: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface StoredFile {
+  fileId: string;
+  roomId: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  senderId: string;
+  senderName: string;
+  sha256?: string;
+  createdAt: string;
+  downloadUrl?: string;
+  storageKey?: string;
+  isDeleted?: boolean;
+}
+
+export interface FileListResponse {
+  files: StoredFile[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }

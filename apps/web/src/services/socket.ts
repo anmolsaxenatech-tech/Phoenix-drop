@@ -5,7 +5,9 @@ import {
   FileMetadata, 
   RoomSettings, 
   RoomMetadata, 
-  ParticipantInfo 
+  ParticipantInfo,
+  StoredFile,
+  RoomActivityLog
 } from '@phoenix-drop/shared';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -18,6 +20,8 @@ export interface JoinRoomResult {
   self?: ParticipantInfo;
   participantToken?: string;
   iceServers?: RTCIceServer[];
+  existingFiles?: StoredFile[];
+  activities?: RoomActivityLog[];
 }
 
 export class SocketService {

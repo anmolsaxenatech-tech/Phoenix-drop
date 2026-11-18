@@ -79,6 +79,16 @@ roomRouter.post('/', async (req: Request, res: Response): Promise<void> => {
 
     await RoomRepository.addParticipant(roomId, hostParticipant);
 
+    await RoomRepository.addActivity(roomId, {
+      id: uuidv4(),
+      roomId,
+      type: 'room_created',
+      description: `Room "${name}" created by ${displayName}`,
+      actorId: hostParticipantId,
+      actorName: displayName,
+      timestamp: new Date().toISOString()
+    });
+
     const room = await RoomRepository.findById(roomId);
     if (!room) {
       res.status(500).json({ error: 'Failed to create room' });
@@ -227,14 +237,40 @@ roomRouter.post('/:id/action', async (req: Request, res: Response): Promise<void
       return;
     }
 
+    const io: any = req.app.get('io');
+
     switch (action) {
-      case 'close_room':
+      case 'close_room': {
         await RoomRepository.closeRoom(roomId);
+        const act: any = {
+          id: uuidv4(),
+          roomId,
+          type: 'room_closed',
+          description: 'The room was permanently closed by the host',
+          timestamp: new Date().toISOString()
+        };
+        await RoomRepository.addActivity(roomId, act);
+        if (io) {
+          io.to(roomId).emit('room:closed', { roomId, message: 'The room has been permanently closed by the host.' });
+          io.to(roomId).emit('activity:new', act);
+          io.in(roomId).disconnectSockets(true);
+        }
         break;
-      case 'lock':
+      }
+      case 'lock': {
         room.isLocked = true;
         room.settings.isLocked = true;
+        const act: any = {
+          id: uuidv4(),
+          roomId,
+          type: 'room_locked',
+          description: 'Room locked by host',
+          timestamp: new Date().toISOString()
+        };
+        await RoomRepository.addActivity(roomId, act);
+        if (io) io.to(roomId).emit('activity:new', act);
         break;
+      }
       case 'unlock':
         room.isLocked = false;
         room.settings.isLocked = false;
@@ -249,8 +285,21 @@ roomRouter.post('/:id/action', async (req: Request, res: Response): Promise<void
         break;
       case 'transfer_host':
         if (targetParticipantId && room.participants.has(targetParticipantId)) {
-          for (const p of room.participants.values()) {
-            p.isHost = (p.id === targetParticipantId);
+          const target = room.participants.get(targetParticipantId);
+          await RoomRepository.transferHost(roomId, targetParticipantId);
+          const act: any = {
+            id: uuidv4(),
+            roomId,
+            type: 'host_transferred',
+            description: `Host ownership transferred to ${target?.displayName || 'Participant'}`,
+            actorId: targetParticipantId,
+            actorName: target?.displayName,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addActivity(roomId, act);
+          if (io) {
+            io.to(roomId).emit('room:host_transferred', { newHostId: targetParticipantId });
+            io.to(roomId).emit('activity:new', act);
           }
         }
         break;

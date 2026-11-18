@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { Server as SocketIOServer } from 'socket.io';
 import { config } from './config.js';
 import { roomRouter } from './routes/room.js';
+import { filesRouter } from './routes/files.js';
 import { setupSignaling } from './signaling/socket.js';
 import { startCleanupService } from './services/cleanup.js';
 
@@ -45,8 +46,8 @@ export function createApp(): { app: Express; server: http.Server; io: SocketIOSe
   });
   app.use('/api/', limiter);
 
-  // Parse JSON payloads
-  app.use(express.json({ limit: '1mb' }));
+  // Parse JSON payloads (allow up to 50MB for in-memory file buffers / multipart chunks)
+  app.use(express.json({ limit: '50mb' }));
 
   // Health Endpoint
   app.get(['/health', '/api/health'], (_req: Request, res: Response) => {
@@ -57,9 +58,6 @@ export function createApp(): { app: Express; server: http.Server; io: SocketIOSe
       uptime: process.uptime()
     });
   });
-
-  // API Routes
-  app.use('/api/rooms', roomRouter);
 
   // Socket.IO Setup
   const io = new SocketIOServer(server, {
@@ -72,7 +70,12 @@ export function createApp(): { app: Express; server: http.Server; io: SocketIOSe
     transports: ['websocket', 'polling']
   });
 
+  app.set('io', io);
   setupSignaling(io);
+
+  // API Routes
+  app.use('/api/rooms', roomRouter);
+  app.use('/api/rooms', filesRouter);
 
   return { app, server, io };
 }

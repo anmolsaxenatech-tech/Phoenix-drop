@@ -5,9 +5,12 @@ import {
   ParticipantInfo, 
   ChatMessage, 
   RoomActivityLog, 
-  FileMetadata 
+  FileMetadata,
+  StoredFile 
 } from '@phoenix-drop/shared';
 import { config } from './config.js';
+import { hashToken } from './security.js';
+import { storageService } from './services/storage.js';
 
 let prismaInstance: PrismaClient | null = null;
 let isPrismaAvailable = false;
@@ -38,6 +41,7 @@ interface MemoryRoom {
   participants: Map<string, ParticipantInfo & { participantToken: string }>;
   messages: ChatMessage[];
   activities: RoomActivityLog[];
+  files: Map<string, StoredFile>;
   transfers: Map<string, FileMetadata & { status: string }>;
 }
 
@@ -68,6 +72,7 @@ export class RoomRepository {
       participants: new Map(),
       messages: [],
       activities: [],
+      files: new Map(),
       transfers: new Map()
     };
 
@@ -178,9 +183,181 @@ export class RoomRepository {
     const room = await this.findById(roomId);
     if (!room) return;
     room.activities.push(activity);
-    if (room.activities.length > 200) {
+    if (room.activities.length > 500) {
       room.activities.shift();
     }
+
+    if (isPrismaAvailable && prisma) {
+      try {
+        await prisma.roomActivity.create({
+          data: {
+            id: activity.id,
+            roomId,
+            type: activity.type,
+            description: activity.description,
+            metadata: activity.metadata ? JSON.stringify(activity.metadata) : null,
+            createdAt: new Date(activity.timestamp)
+          }
+        });
+      } catch (err) {
+        // Ignored fallback
+      }
+    }
+  }
+
+  static async getActivities(roomId: string): Promise<RoomActivityLog[]> {
+    const room = await this.findById(roomId);
+    if (!room) return [];
+    return [...room.activities];
+  }
+
+  static async saveFile(file: StoredFile): Promise<void> {
+    const room = await this.findById(file.roomId);
+    if (!room) return;
+    room.files.set(file.fileId, { ...file, isDeleted: false });
+
+    if (isPrismaAvailable && prisma) {
+      try {
+        await prisma.transferMetadata.upsert({
+          where: { fileId: file.fileId },
+          update: {
+            fileName: file.fileName,
+            fileSize: BigInt(file.fileSize),
+            fileType: file.fileType,
+            sha256: file.sha256 || '',
+            storageKey: file.storageKey || null,
+            status: 'completed',
+            isDeleted: false,
+            completedAt: new Date()
+          },
+          create: {
+            id: file.fileId,
+            roomId: file.roomId,
+            fileId: file.fileId,
+            fileName: file.fileName,
+            fileSize: BigInt(file.fileSize),
+            fileType: file.fileType,
+            totalChunks: 1,
+            chunkSize: 65536,
+            sha256: file.sha256 || '',
+            senderId: file.senderId,
+            senderName: file.senderName,
+            status: 'completed',
+            storageKey: file.storageKey || null,
+            isDeleted: false,
+            createdAt: new Date(file.createdAt),
+            completedAt: new Date()
+          }
+        });
+      } catch (err) {
+        // Ignored fallback
+      }
+    }
+  }
+
+  static async getFile(roomId: string, fileId: string): Promise<StoredFile | null> {
+    const room = await this.findById(roomId);
+    if (!room) return null;
+    const file = room.files.get(fileId);
+    if (!file || file.isDeleted) return null;
+    return file;
+  }
+
+  static async listFiles(
+    roomId: string, 
+    options: { page?: number; limit?: number; q?: string; sort?: 'newest' | 'oldest'; type?: string } = {}
+  ): Promise<{ files: StoredFile[]; total: number; page: number; limit: number; totalPages: number }> {
+    const room = await this.findById(roomId);
+    if (!room) {
+      return { files: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+    }
+
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.min(100, Math.max(1, options.limit || 20));
+
+    let fileList = Array.from(room.files.values()).filter(f => !f.isDeleted);
+
+    // Search query filter
+    if (options.q) {
+      const qLower = options.q.toLowerCase().trim();
+      fileList = fileList.filter(f => f.fileName.toLowerCase().includes(qLower));
+    }
+
+    // Type filter
+    if (options.type) {
+      const typeLower = options.type.toLowerCase().trim();
+      fileList = fileList.filter(f => f.fileType.toLowerCase().includes(typeLower));
+    }
+
+    // Sorting
+    fileList.sort((a, b) => {
+      const timeA = new Date(a.createdAt).getTime();
+      const timeB = new Date(b.createdAt).getTime();
+      return options.sort === 'oldest' ? timeA - timeB : timeB - timeA;
+    });
+
+    const total = fileList.length;
+    const totalPages = Math.ceil(total / limit);
+    const startIdx = (page - 1) * limit;
+    const pagedFiles = fileList.slice(startIdx, startIdx + limit);
+
+    return {
+      files: pagedFiles,
+      total,
+      page,
+      limit,
+      totalPages
+    };
+  }
+
+  static async deleteFile(roomId: string, fileId: string): Promise<boolean> {
+    const room = await this.findById(roomId);
+    if (!room) return false;
+    const file = room.files.get(fileId);
+    if (!file || file.isDeleted) return false;
+
+    file.isDeleted = true;
+
+    if (isPrismaAvailable && prisma) {
+      try {
+        await prisma.transferMetadata.update({
+          where: { fileId },
+          data: { isDeleted: true, deletedAt: new Date() }
+        });
+      } catch (e) {
+        // Ignored
+      }
+    }
+    return true;
+  }
+
+  static async verifyParticipant(roomId: string, token: string): Promise<{ participant?: ParticipantInfo; isHost: boolean }> {
+    const room = await this.findById(roomId);
+    if (!room) return { isHost: false };
+
+    // Check host token
+    if (hashToken(token) === room.hostTokenHash) {
+      return { isHost: true };
+    }
+
+    // Check participant session tokens
+    for (const p of room.participants.values()) {
+      if (p.participantToken === token) {
+        return { participant: p, isHost: Boolean(p.isHost) };
+      }
+    }
+
+    return { isHost: false };
+  }
+
+  static async transferHost(roomId: string, targetParticipantId: string): Promise<boolean> {
+    const room = await this.findById(roomId);
+    if (!room || !room.participants.has(targetParticipantId)) return false;
+
+    for (const p of room.participants.values()) {
+      p.isHost = (p.id === targetParticipantId);
+    }
+    return true;
   }
 
   static async addTransferMetadata(roomId: string, metadata: FileMetadata): Promise<void> {
@@ -204,6 +381,7 @@ export class RoomRepository {
       codeToRoomId.delete(room.code.toUpperCase());
       memoryRooms.delete(id);
     }
+    await storageService.deleteRoomFiles(id);
     if (isPrismaAvailable && prisma) {
       try {
         await prisma.room.delete({ where: { id } });

@@ -47,28 +47,80 @@ export function setupSignaling(io: Server): void {
           return;
         }
 
-        if (room.participants.size >= room.settings.maxParticipants) {
-          callback?.({ error: 'Room has reached maximum participant capacity' });
-          return;
+        let participant: any = null;
+        let isHost = false;
+        let participantId = '';
+        let participantToken = '';
+
+        // Check if reconnecting/attaching with existing participantToken
+        if (payload.participantToken) {
+          for (const p of room.participants.values()) {
+            if (p.participantToken === payload.participantToken) {
+              p.socketId = socket.id;
+              p.connectionState = 'connected';
+              if (payload.displayName) p.displayName = payload.displayName;
+              participant = p;
+              participantId = p.id;
+              participantToken = p.participantToken;
+              isHost = Boolean(p.isHost);
+              break;
+            }
+          }
         }
 
-        // Determine if first participant or host
-        const isHost = room.participants.size === 0;
-        const participantId = uuidv4();
-        const participantToken = uuidv4();
+        // Check if joining with hostToken
+        if (!participant && payload.hostToken && hashToken(payload.hostToken) === room.hostTokenHash) {
+          for (const p of room.participants.values()) {
+            if (p.isHost) {
+              p.socketId = socket.id;
+              p.connectionState = 'connected';
+              participant = p;
+              participantId = p.id;
+              participantToken = p.participantToken;
+              isHost = true;
+              break;
+            }
+          }
+          if (!participant) {
+            isHost = true;
+          }
+        }
 
-        const participant = {
-          id: participantId,
-          socketId: socket.id,
-          displayName: payload.displayName || 'Guest',
-          isHost,
-          joinedAt: new Date().toISOString(),
-          deviceType: payload.deviceType || 'unknown',
-          connectionState: 'connected' as const,
-          participantToken
-        };
+        // New participant
+        if (!participant) {
+          if (room.participants.size >= room.settings.maxParticipants) {
+            callback?.({ error: 'Room has reached maximum participant capacity' });
+            return;
+          }
 
-        await RoomRepository.addParticipant(room.id, participant);
+          // If no participant currently claims host, assign host
+          let hasActiveHost = false;
+          for (const p of room.participants.values()) {
+            if (p.isHost) {
+              hasActiveHost = true;
+              break;
+            }
+          }
+          if (!hasActiveHost) {
+            isHost = true;
+          }
+
+          participantId = uuidv4();
+          participantToken = uuidv4();
+
+          participant = {
+            id: participantId,
+            socketId: socket.id,
+            displayName: payload.displayName || 'Guest',
+            isHost,
+            joinedAt: new Date().toISOString(),
+            deviceType: payload.deviceType || 'unknown',
+            connectionState: 'connected' as const,
+            participantToken
+          };
+
+          await RoomRepository.addParticipant(room.id, participant);
+        }
 
         data.roomId = room.id;
         data.participantId = participantId;
@@ -87,8 +139,10 @@ export function setupSignaling(io: Server): void {
         }
 
         const publicMetadata = RoomRepository.getPublicRoomMetadata(room, hostId);
+        const filesResult = await RoomRepository.listFiles(room.id, { limit: 100 });
+        const activities = await RoomRepository.getActivities(room.id);
 
-        // Send confirmation back to joining client
+        // Send confirmation back to joining client with full file and activity history
         callback?.({
           success: true,
           room: publicMetadata,
@@ -102,7 +156,9 @@ export function setupSignaling(io: Server): void {
             connectionState: participant.connectionState
           },
           participantToken,
-          iceServers: config.stunServers
+          iceServers: config.stunServers,
+          existingFiles: filesResult.files,
+          activities
         });
 
         // Notify other room participants
@@ -132,13 +188,17 @@ export function setupSignaling(io: Server): void {
         await RoomRepository.addChatMessage(room.id, joinMsg);
         io.to(room.id).emit('chat:message', joinMsg);
 
-        await RoomRepository.addActivity(room.id, {
+        const joinAct: any = {
           id: uuidv4(),
           roomId: room.id,
           type: 'participant_joined',
-          description: `${participant.displayName} joined`,
+          description: `${participant.displayName} joined the room`,
+          actorId: participant.id,
+          actorName: participant.displayName,
           timestamp: new Date().toISOString()
-        });
+        };
+        await RoomRepository.addActivity(room.id, joinAct);
+        socket.to(room.id).emit('activity:new', joinAct);
       } catch (err) {
         console.error('[Signaling] Join error:', err);
         callback?.({ error: 'Server error joining room' });
@@ -294,7 +354,22 @@ export function setupSignaling(io: Server): void {
         socket.to(roomId).emit('signal:peer_left', { peerId: participantId });
 
         if (result.wasHost && result.newHostId) {
+          const room = await RoomRepository.findById(roomId);
+          const newHost = room?.participants.get(result.newHostId);
           io.to(roomId).emit('room:host_transferred', { newHostId: result.newHostId });
+          
+          const hostAct: any = {
+            id: uuidv4(),
+            roomId,
+            type: 'host_transferred',
+            description: `Host left. Ownership transferred to ${newHost?.displayName || 'remaining participant'}.`,
+            actorId: result.newHostId,
+            actorName: newHost?.displayName,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addActivity(roomId, hostAct);
+          io.to(roomId).emit('activity:new', hostAct);
+
           const hostMsg: ChatMessage = {
             id: uuidv4(),
             roomId,
@@ -302,7 +377,7 @@ export function setupSignaling(io: Server): void {
             senderName: 'System',
             isHost: false,
             isSystem: true,
-            content: 'Host left the room. Ownership transferred to remaining participant.',
+            content: `Host left the room. Ownership transferred to ${newHost?.displayName || 'remaining participant'}.`,
             timestamp: new Date().toISOString()
           };
           await RoomRepository.addChatMessage(roomId, hostMsg);
@@ -310,6 +385,18 @@ export function setupSignaling(io: Server): void {
         }
 
         if (displayName) {
+          const leaveAct: any = {
+            id: uuidv4(),
+            roomId,
+            type: 'participant_left',
+            description: `${displayName} left the room`,
+            actorId: participantId,
+            actorName: displayName,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addActivity(roomId, leaveAct);
+          socket.to(roomId).emit('activity:new', leaveAct);
+
           const leaveMsg: ChatMessage = {
             id: uuidv4(),
             roomId,
@@ -341,38 +428,83 @@ export function setupSignaling(io: Server): void {
 
       await RoomRepository.closeRoom(data.roomId);
 
+      const closeAct: any = {
+        id: uuidv4(),
+        roomId: data.roomId,
+        type: 'room_closed',
+        description: 'The room was permanently closed by the host',
+        timestamp: new Date().toISOString()
+      };
+      await RoomRepository.addActivity(data.roomId, closeAct);
+
       // Notify all connected participants in real time
       io.to(data.roomId).emit('room:closed', {
         roomId: data.roomId,
         message: 'The room has been permanently closed by the host.'
       });
+      io.to(data.roomId).emit('activity:new', closeAct);
 
       callback?.({ success: true });
+
+      const targetRoomId = data.roomId;
+      setTimeout(() => {
+        io.in(targetRoomId).disconnectSockets(true);
+      }, 50);
     });
 
     // 10. Disconnect Cleanup
     socket.on('disconnect', async () => {
       if (data.roomId && data.participantId) {
-        const result = await RoomRepository.removeParticipant(data.roomId, data.participantId);
-        socket.to(data.roomId).emit('signal:peer_left', { peerId: data.participantId });
+        const roomId = data.roomId;
+        const participantId = data.participantId;
+        const displayName = data.displayName;
+
+        const result = await RoomRepository.removeParticipant(roomId, participantId);
+        socket.to(roomId).emit('signal:peer_left', { peerId: participantId });
 
         if (result.wasHost && result.newHostId) {
-          socket.to(data.roomId).emit('room:host_transferred', { newHostId: result.newHostId });
+          const room = await RoomRepository.findById(roomId);
+          const newHost = room?.participants.get(result.newHostId);
+          socket.to(roomId).emit('room:host_transferred', { newHostId: result.newHostId });
+
+          const hostAct: any = {
+            id: uuidv4(),
+            roomId,
+            type: 'host_transferred',
+            description: `Host disconnected. Ownership transferred to ${newHost?.displayName || 'remaining participant'}.`,
+            actorId: result.newHostId,
+            actorName: newHost?.displayName,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addActivity(roomId, hostAct);
+          socket.to(roomId).emit('activity:new', hostAct);
         }
 
-        if (data.displayName) {
+        if (displayName) {
+          const leaveAct: any = {
+            id: uuidv4(),
+            roomId,
+            type: 'participant_left',
+            description: `${displayName} left the room`,
+            actorId: participantId,
+            actorName: displayName,
+            timestamp: new Date().toISOString()
+          };
+          await RoomRepository.addActivity(roomId, leaveAct);
+          socket.to(roomId).emit('activity:new', leaveAct);
+
           const leaveMsg: ChatMessage = {
             id: uuidv4(),
-            roomId: data.roomId,
+            roomId,
             senderId: 'system',
             senderName: 'System',
             isHost: false,
             isSystem: true,
-            content: `${data.displayName} left the room`,
+            content: `${displayName} left the room`,
             timestamp: new Date().toISOString()
           };
-          await RoomRepository.addChatMessage(data.roomId, leaveMsg);
-          socket.to(data.roomId).emit('chat:message', leaveMsg);
+          await RoomRepository.addChatMessage(roomId, leaveMsg);
+          socket.to(roomId).emit('chat:message', leaveMsg);
         }
       }
     });

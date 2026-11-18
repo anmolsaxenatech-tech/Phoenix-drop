@@ -70,8 +70,35 @@ export const FileMetadataSchema = z.object({
   createdAt: z.string()
 });
 
+export const FileListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().trim().optional(),
+  sort: z.enum(['newest', 'oldest']).default('newest'),
+  type: z.string().trim().optional()
+});
+
+export const InitiateMultipartUploadSchema = z.object({
+  fileName: z.string().min(1).max(255),
+  fileSize: z.number().int().positive().max(DEFAULT_MAX_FILE_SIZE),
+  fileType: z.string().max(128).default('application/octet-stream'),
+  sha256: z.string().optional()
+});
+
+export const CompleteMultipartUploadSchema = z.object({
+  fileId: z.string(),
+  uploadId: z.string(),
+  parts: z.array(z.object({
+    partNumber: z.number().int().positive(),
+    eTag: z.string()
+  }))
+});
+
 export type CreateRoomInput = z.infer<typeof CreateRoomSchema>;
 export type JoinRoomInput = z.infer<typeof JoinRoomSchema>;
 export type UpdateRoomSettingsInput = z.infer<typeof UpdateRoomSettingsSchema>;
 export type HostActionInput = z.infer<typeof HostActionSchema>;
 export type SendChatMessageInput = z.infer<typeof SendChatMessageSchema>;
+export type FileListQueryInput = z.infer<typeof FileListQuerySchema>;
+export type InitiateMultipartUploadInput = z.infer<typeof InitiateMultipartUploadSchema>;
+export type CompleteMultipartUploadInput = z.infer<typeof CompleteMultipartUploadSchema>;

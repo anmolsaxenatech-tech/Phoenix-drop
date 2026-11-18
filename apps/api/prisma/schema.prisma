@@ -17,6 +17,7 @@ model Room {
   passwordHash        String?           // Argon2id hash if password protected
   hostTokenHash       String            // SHA-256 / Argon2 hash of host secret token
   isLocked            Boolean           @default(false)
+  isClosed            Boolean           @default(false)
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   expiresAt           DateTime          // Expiration timestamp for automatic cleanup
@@ -114,13 +115,16 @@ model TransferMetadata {
   fileName         String
   fileSize         BigInt
   fileType         String
-  totalChunks      Int
-  chunkSize        Int
-  sha256           String
+  totalChunks      Int      @default(1)
+  chunkSize        Int      @default(65536)
+  sha256           String   @default("")
   senderId         String
   senderName       String
-  status           String   @default("announced") // announced, transferring, completed, failed
+  status           String   @default("completed") // announced, transferring, completed, failed, deleted
+  storageKey       String?
+  isDeleted        Boolean  @default(false)
   completedAt      DateTime?
+  deletedAt        DateTime?
   createdAt        DateTime @default(now())
 
   room             Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
